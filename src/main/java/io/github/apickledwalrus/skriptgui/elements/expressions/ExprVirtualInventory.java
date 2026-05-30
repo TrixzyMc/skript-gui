@@ -10,6 +10,9 @@ import ch.njol.skript.lang.ExpressionType;
 import ch.njol.skript.lang.SkriptParser.ParseResult;
 import ch.njol.skript.lang.util.SimpleExpression;
 import ch.njol.util.Kleenean;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.event.Event;
 import org.bukkit.event.inventory.InventoryType;
@@ -20,7 +23,7 @@ import org.eclipse.jdt.annotation.Nullable;
 @Description("An expression to create inventories that can be used with GUIs.")
 @Examples("create a gui with virtual chest inventory with 3 rows named \"My GUI\"")
 @Since("1.0.0")
-public class ExprVirtualInventory extends SimpleExpression<Inventory>{
+public class ExprVirtualInventory extends SimpleExpression<Inventory> {
 
 	static {
 		Skript.registerExpression(ExprVirtualInventory.class, Inventory.class, ExpressionType.SIMPLE,
@@ -31,43 +34,27 @@ public class ExprVirtualInventory extends SimpleExpression<Inventory>{
 		);
 	}
 
-	@Nullable
-	private InventoryType specifiedType;
-	@Nullable
-	private Expression<InventoryType> inventoryType;
-	@Nullable
-	private Expression<Number> rows;
-	@Nullable
-	private Expression<String> name;
+	@Nullable private InventoryType specifiedType;
+	@Nullable private Expression<InventoryType> inventoryType;
+	@Nullable private Expression<Number> rows;
+	@Nullable private Expression<String> name;
 
-	// The name of this inventory.
-	@Nullable
-	private String invName;
+	@Nullable private String invName;
 
 	@Override
 	@SuppressWarnings("unchecked")
 	public boolean init(Expression<?>[] exprs, int matchedPattern, Kleenean kleenean, ParseResult parseResult) {
+
 		inventoryType = (Expression<InventoryType>) exprs[0];
-		if (inventoryType == null) { // They must be using a specific one
+
+		if (inventoryType == null) {
 			switch (parseResult.mark) {
-				case 1:
-					specifiedType = InventoryType.WORKBENCH;
-					break;
-				case 2:
-					specifiedType = InventoryType.CHEST;
-					break;
-				case 3:
-					specifiedType = InventoryType.ANVIL;
-					break;
-				case 4:
-					specifiedType = InventoryType.HOPPER;
-					break;
-				case 5:
-					specifiedType = InventoryType.DROPPER;
-					break;
-				case 6:
-					specifiedType = InventoryType.DISPENSER;
-					break;
+				case 1 -> specifiedType = InventoryType.WORKBENCH;
+				case 2 -> specifiedType = InventoryType.CHEST;
+				case 3 -> specifiedType = InventoryType.ANVIL;
+				case 4 -> specifiedType = InventoryType.HOPPER;
+				case 5 -> specifiedType = InventoryType.DROPPER;
+				case 6 -> specifiedType = InventoryType.DISPENSER;
 			}
 		}
 
@@ -82,36 +69,63 @@ public class ExprVirtualInventory extends SimpleExpression<Inventory>{
 		return true;
 	}
 
+	/**
+	 * Converts MiniMessage → Component → Legacy string
+	 * Safe for all MC versions from 1.16+
+	 */
+	private String formatTitle(String input) {
+		if (input == null || input.isEmpty()) return "";
+
+		try {
+			Component component = MiniMessage.miniMessage().deserialize(input);
+			return LegacyComponentSerializer.legacySection().serialize(component);
+		} catch (Exception e) {
+			return input; // fallback
+		}
+	}
+
 	@Override
 	protected Inventory[] get(Event e) {
+
 		InventoryType type = inventoryType != null ? inventoryType.getSingle(e) : specifiedType;
+
 		if (type == null) {
 			return new Inventory[0];
-		} else if (type == InventoryType.CRAFTING) { // Make it a valid inventory. It's not the same, but it's likely what the user wants.
+		}
+
+		if (type == InventoryType.CRAFTING) {
 			type = InventoryType.WORKBENCH;
 		}
 
-		String name = this.name != null ? this.name.getSingle(e) : null;
-		invName = name != null ? name : type.getDefaultTitle();
+		String rawName = name != null ? name.getSingle(e) : null;
+		invName = rawName != null ? rawName : type.getDefaultTitle();
+
+		String title = formatTitle(invName);
 
 		Inventory inventory;
+
 		if (type == InventoryType.CHEST) {
+
 			int size = -1;
+
 			if (rows != null) {
-				Number rows = this.rows.getSingle(e);
-				if (rows != null) {
-					size = rows.intValue();
+				Number r = rows.getSingle(e);
+				if (r != null) {
+					size = r.intValue();
 					if (size <= 6) {
 						size *= 9;
 					}
 				}
 			}
-			if (size < 9 || size > 54 || size % 9 != 0) { // Invalid inventory size
+
+			if (size < 9 || size > 54 || size % 9 != 0) {
 				size = type.getDefaultSize();
 			}
-			inventory = Bukkit.getServer().createInventory(null, size, invName);
+
+			inventory = Bukkit.getServer().createInventory(null, size, title);
+
 		} else {
-			inventory = Bukkit.getServer().createInventory(null, type, invName);
+			inventory = Bukkit.getServer().createInventory(null, type, title);
 		}
 
 		return new Inventory[]{inventory};
@@ -129,17 +143,15 @@ public class ExprVirtualInventory extends SimpleExpression<Inventory>{
 
 	@Override
 	public String toString(@Nullable Event e, boolean debug) {
-		return "virtual " + (inventoryType != null ? inventoryType.toString(e, debug) : specifiedType != null ? specifiedType.name().toLowerCase() : "unknown inventory type")
-			+ (name != null ? " with name" + name.toString(e, debug) : "")
-			+ (rows != null ? " with " + rows.toString(e, debug) + " rows" : "");
+		return "virtual " +
+				(inventoryType != null
+						? inventoryType.toString(e, debug)
+						: specifiedType != null ? specifiedType.name().toLowerCase() : "unknown")
+				+ (name != null ? " named " + name.toString(e, debug) : "")
+				+ (rows != null ? " with " + rows.toString(e, debug) + " rows" : "");
 	}
 
-	/**
-	 * @return The name of this inventory. If {@link #invName} is null
-	 * when this method is called, an empty string will be returned.
-	 */
 	public String getName() {
 		return invName != null ? invName : "";
 	}
-
 }
